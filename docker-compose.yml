@@ -1,0 +1,15 @@
+services:
+  dux-sync:
+    build: .
+    image: dux-sync:latest
+    container_name: dux-sync
+    restart: always
+    env_file: .env
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').getcode()==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
