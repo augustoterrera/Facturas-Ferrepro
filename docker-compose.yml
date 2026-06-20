@@ -6,7 +6,9 @@ services:
     restart: always
     env_file: .env
     ports:
-      - "8000:8000"
+      # Siempre bindea a localhost (no se expone a internet; usar SSH o reverse proxy).
+      # HOST_PORT configura el puerto del host. En el VPS el 8000 ya lo usa otra app → HOST_PORT=8011.
+      - "127.0.0.1:${HOST_PORT:-8000}:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').getcode()==200 else 1)"]
       interval: 30s
