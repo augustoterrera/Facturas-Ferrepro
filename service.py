@@ -19,6 +19,7 @@ Correr:  uvicorn service:app --host 0.0.0.0 --port 8000
 import os
 import logging
 import threading
+import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -27,6 +28,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 import sync_facturas as core
+import notifier
 
 core.cargar_env()
 logging.basicConfig(
@@ -45,6 +47,29 @@ JOBS = {
 }
 
 
+def _alertar_si_errores(tipo: str, trigger: str, res: dict):
+    """Manda alerta a Telegram si la corrida terminó con errores (no fatal)."""
+    fatales = [s for s in res.get("sucursales", []) if s.get("error_fatal")]
+    n_err = res.get("error", 0)
+    if not (n_err or fatales):
+        return
+    partes = []
+    for s in fatales:
+        partes.append(f"emp {s.get('empresa')} suc {s.get('sucursal')}: "
+                      f"{s.get('error_fatal')}")
+    for s in res.get("sucursales", []):
+        if s.get("error") and s.get("ultimo_error"):
+            partes.append(f"emp {s.get('empresa')} suc {s.get('sucursal')} "
+                          f"({s['error']} fallidas): {s['ultimo_error']}")
+    notifier.notify_error(
+        f"{tipo} terminó con errores",
+        detalle="\n".join(partes) or None,
+        contexto={"trigger": trigger,
+                  "facturas_con_error": n_err,
+                  "sucursales_con_fallo": len(fatales)},
+    )
+
+
 def _run(tipo: str, trigger: str):
     """Corre un job (incremental|full) garantizando exclusión mutua."""
     if not _lock.acquire(blocking=False):
@@ -56,6 +81,7 @@ def _run(tipo: str, trigger: str):
         res["tipo"] = tipo
         res["trigger"] = trigger
         _ultima[tipo] = res
+        _alertar_si_errores(tipo, trigger, res)
         return res
     except Exception as e:                 # nunca dejar caer el scheduler
         log.exception("%s falló (%s)", tipo, trigger)
@@ -63,6 +89,11 @@ def _run(tipo: str, trigger: str):
             "tipo": tipo, "trigger": trigger, "error_fatal": str(e),
             "fin": datetime.now(timezone.utc).isoformat(),
         }
+        notifier.notify_error(
+            f"{tipo} CRASH",
+            detalle=traceback.format_exc(),
+            contexto={"trigger": trigger},
+        )
         return _ultima[tipo]
     finally:
         _lock.release()

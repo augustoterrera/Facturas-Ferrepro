@@ -123,6 +123,10 @@ curl -X POST localhost:8000/sync
 | `FULL_RESYNC_CRON` | `0 6 * * 1` | Cron (UTC) del re-sync completo. Vacío = desactivado. |
 | `SYNC_ON_START` | `false` | `true` = sync al arrancar. |
 | `LOG_LEVEL` | `INFO` | Nivel de logging. |
+| `HOST_PORT` | `8000` | Puerto del host (siempre bindea a `127.0.0.1`). En el VPS: `8011`. |
+| `TELEGRAM_BOT_TOKEN` | — | Bot de @BotFather. Vacío = alertas desactivadas. |
+| `TELEGRAM_CHAT_ID` | — | Chat/grupo destino de las alertas. |
+| `ALERT_PROJECT` | `facturas-ferrepro` | Nombre que aparece en la alerta. |
 
 ## Operación / notas
 
@@ -132,4 +136,22 @@ curl -X POST localhost:8000/sync
 - **Anulaciones viejas:** la ventana móvil capta cambios dentro de los últimos
   `DUX_VENTANA_DIAS`. Para anulaciones de comprobantes más viejos, corré un
   backfill del período cada tanto.
+
+## Alertas por Telegram
+
+Si una corrida (incremental o full) **crashea** o **termina con errores**, el
+servicio manda un mensaje a Telegram con el proyecto, el trigger y el detalle
+del error. Si `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` están vacíos, no hace nada.
+
+Setup:
+1. Hablá con [@BotFather](https://t.me/BotFather) → `/newbot` → copiá el **token**.
+2. Mandale un mensaje al bot (o agregalo a un grupo) y obtené el **chat id**:
+   `curl "https://api.telegram.org/bot<TOKEN>/getUpdates"` → buscá `chat.id`.
+3. Cargá `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` y `ALERT_PROJECT` en el `.env`.
+4. Probá el envío: `python notifier.py "hola"` (o dentro del contenedor:
+   `docker compose exec dux-sync python notifier.py "hola"`).
+
+El módulo [`notifier.py`](notifier.py) no tiene dependencias (usa la stdlib) y es
+**portátil**: copialo a otro proyecto, seteá las 3 variables (con su propio
+`ALERT_PROJECT`) y llamá `notifier.notify_error(titulo, detalle, contexto)`.
 - **Secretos:** `.env` y `credenciales.md` están en `.gitignore` — no los subas.

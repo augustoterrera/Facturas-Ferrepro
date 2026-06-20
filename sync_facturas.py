@@ -450,7 +450,7 @@ def run_sync(desde, hasta, sucursal_filtro=None, sb=None, dux=None):
                 resumen["sucursales"].append({
                     "empresa": emp, "sucursal": suc["id"], "nombre": suc.get("sucursal"),
                     "desde": desde, "hasta": hasta, "traidas": traidas,
-                    "ok": ok, "error": error,
+                    "ok": ok, "error": error, "ultimo_error": ult,
                 })
     finally:
         if propio:
@@ -516,7 +516,7 @@ def run_incremental(ventana_dias=None, sb=None, dux=None):
                     resumen["sucursales"].append({
                         "empresa": emp, "sucursal": sid, "nombre": suc.get("sucursal"),
                         "desde": desde, "hasta": hasta, "traidas": traidas,
-                        "ok": ok, "error": error,
+                        "ok": ok, "error": error, "ultimo_error": ult,
                     })
                 except Exception as e:
                     log.exception("fallo sync emp %s suc %s", emp, sid)
