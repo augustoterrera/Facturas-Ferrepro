@@ -7,7 +7,7 @@ ENV PYTHONUNBUFFERED=1 \
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-COPY sync_facturas.py service.py notifier.py ./
+COPY sync_facturas.py sync_productos.py sync_meta.py service.py notifier.py ./
 
 EXPOSE 8000
 

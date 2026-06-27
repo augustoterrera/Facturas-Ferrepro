@@ -14,3 +14,8 @@ venv/
 .claude
 .env.*
 !.env.example
+
+AGENTS.md
+CLAUDE.md
+# solo la carpeta de n8n en la raíz (NO .github/workflows)
+/workflows/

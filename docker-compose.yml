@@ -1,7 +1,7 @@
 services:
   dux-sync:
-    build: .
-    image: dux-sync:latest
+    build: .                                              # dev: build local
+    image: ghcr.io/augustoterrera/facturas-ferrepro:latest   # prod: se baja de GHCR (docker compose pull)
     container_name: dux-sync
     restart: always
     env_file: .env

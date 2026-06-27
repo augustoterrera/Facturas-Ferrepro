@@ -1,0 +1,107 @@
+name: CI + Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-vps-facturas
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/augustoterrera/facturas-ferrepro
+
+jobs:
+  # ── Gate de calidad + build del artefacto ── corre en cada push y PR.
+  # En push a main, además pushea la imagen a GHCR (la que va a correr en prod).
+  checks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+
+      - name: Lint (solo errores reales, sin estilo)
+        run: |
+          pip install ruff
+          ruff check --select E9,F63,F7,F82 .
+
+      - name: Build de la imagen (con reintentos ante blips de Docker Hub)
+        run: |
+          n=0
+          until docker build -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:latest" .; do
+            n=$((n+1)); [ "$n" -ge 3 ] && { echo "build falló tras $n intentos"; exit 1; }
+            echo "Docker Hub no respondió; reintento $n en 15s..."; sleep 15
+          done
+
+      - name: Smoke — que los módulos importen
+        run: docker run --rm "$IMAGE:$GITHUB_SHA" python -c "import service; print('import OK')"
+
+      - name: Smoke — syncs nuevos
+        run: |
+          docker run --rm "$IMAGE:$GITHUB_SHA" python sync_productos.py --self-check
+          docker run --rm "$IMAGE:$GITHUB_SHA" python sync_meta.py --self-check
+
+      - name: Login a GHCR (solo para pushear)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push a GHCR (el artefacto exacto que pasó los checks)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker push "$IMAGE:$GITHUB_SHA"
+          docker push "$IMAGE:latest"
+
+  # ── Deploy ── SOLO en push a main y SOLO si 'checks' pasó. Baja la imagen de GHCR (no rebuildea).
+  deploy:
+    needs: checks
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy por SSH (pull de GHCR + healthcheck + rollback)
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script_stop: true
+          script: |
+            set -e
+            cd /opt/apps/Facturas-Ferrepro
+            IMAGE=ghcr.io/augustoterrera/facturas-ferrepro
+
+            PREV=$(git rev-parse HEAD)
+            git pull --ff-only
+            docker compose pull
+            docker compose up -d
+
+            docker compose exec -T dux-sync python -c "import os,sys; req=('DUX_TOKEN','SUPABASE_URL','SUPABASE_SERVICE_KEY','TIENDANUBE_STORE_ID','TIENDANUBE_ACCESS_TOKEN','OPENAI_API_KEY','META_AD_ACCOUNT_ID','META_ACCESS_TOKEN'); miss=[k for k in req if not os.environ.get(k)]; print('env OK' if not miss else 'faltan env: '+', '.join(miss)); sys.exit(1 if miss else 0)"
+
+            # Healthcheck: esperar a que el servicio responda 200 en /health (hasta ~30s).
+            ok=0
+            for i in $(seq 1 10); do
+              if docker compose exec -T dux-sync python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=5).status==200 else 1)" 2>/dev/null; then
+                ok=1; break
+              fi
+              sleep 3
+            done
+
+            if [ "$ok" != "1" ]; then
+              echo "HEALTHCHECK FALLÓ -> rollback al commit/imagen previos ($PREV)"
+              git reset --hard "$PREV"
+              docker pull "$IMAGE:$PREV" && docker tag "$IMAGE:$PREV" "$IMAGE:latest" || true
+              docker compose up -d
+              exit 1
+            fi
+            echo "Deploy OK y healthy en $(git rev-parse --short HEAD)"

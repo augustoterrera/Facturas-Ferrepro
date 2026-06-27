@@ -1,15 +1,17 @@
-# Sync de facturas Dux → Supabase
+# Sync Ferrepro → Supabase
 
-Microservicio que sincroniza las facturas de **Dux Software** hacia **Supabase**,
-por sucursal, de forma incremental y desatendida.
+Microservicio que alimenta **Supabase** para Ferrepro: facturas de **Dux**,
+productos de **Tiendanube** y métricas de **Meta Ads**.
 
 ## Arquitectura
 
 Un solo proceso (`service.py`):
 
-- **APScheduler** corre un sync incremental cada `SYNC_INTERVAL_MIN` minutos.
-- **FastAPI** expone `/health`, `/status` y `/sync`.
+- **APScheduler** corre jobs de facturas, productos y Meta.
+- **FastAPI** expone `/health`, `/status` y endpoints on-demand.
 - `sync_facturas.py` es el core reutilizable (también se usa como CLI).
+- `sync_productos.py` sincroniza productos/RAG y reconciliación.
+- `sync_meta.py` sincroniza Meta Ads.
 
 ```
 Dux API ──(httpx, 1 req/5s)──> [lotes Dux crudo] ──> RPC sync_facturas_dux() ──> Supabase
@@ -55,7 +57,9 @@ Para cada `(empresa, sucursal)` se guarda un *watermark* en `sync_state`:
    [`db/migrations/001_schema.sql`](db/migrations/001_schema.sql) (esquema completo:
    tablas, índices, funciones, trigger) y luego
    [`db/migrations/002_sync_facturas_dux.sql`](db/migrations/002_sync_facturas_dux.sql)
-   (función cargadora que usa el micro). Ambos son re-ejecutables.
+   (función cargadora de facturas) y
+   [`db/migrations/003_productos_meta.sql`](db/migrations/003_productos_meta.sql)
+   (productos + Meta). Son re-ejecutables.
    > Inventario de objetos y cómo reconstruir la base están en [`db/README.md`](db/README.md).
 
 2. **Credenciales** — copiá `.env.example` a `.env` y completá:
@@ -88,6 +92,11 @@ python sync_facturas.py --desde 2024-01-01 --hasta 2026-06-30
 
 # Una corrida incremental puntual:
 python sync_facturas.py --incremental
+
+# Productos / Meta:
+python sync_productos.py
+python sync_productos.py --reconcile
+python sync_meta.py
 ```
 
 ## Endpoints
@@ -98,6 +107,9 @@ python sync_facturas.py --incremental
 | GET | `/status` | Última corrida (incremental y full) + watermark por sucursal. |
 | POST | `/sync` | Dispara un sync **incremental** on-demand (no bloquea). |
 | POST | `/resync` | Dispara un **re-sync completo** on-demand (tarda; capta ediciones viejas). |
+| POST | `/productos/sync` | Dispara sync de productos Tiendanube. |
+| POST | `/productos/reconcile` | Reconcilia productos publicados. |
+| POST | `/meta/sync` | Dispara sync de Meta Ads. |
 
 ```bash
 curl localhost:8000/health
