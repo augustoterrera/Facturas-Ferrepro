@@ -75,7 +75,6 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          script_stop: true
           script: |
             set -e
             cd /opt/apps/Facturas-Ferrepro
@@ -90,10 +89,9 @@ jobs:
               n=$((n+1)); [ "$n" -ge 3 ] && { echo "pull falló tras $n intentos"; exit 1; }
               echo "GHCR no respondió; reintento $n en 15s..."; sleep 15
             done
+            docker run --rm --env-file .env "$IMAGE:$DEPLOY_SHA" python -c "import os,sys; req=('DUX_TOKEN','SUPABASE_URL','SUPABASE_SERVICE_KEY','TIENDANUBE_STORE_ID','TIENDANUBE_ACCESS_TOKEN','OPENAI_API_KEY','META_AD_ACCOUNT_ID','META_ACCESS_TOKEN'); miss=[k for k in req if not os.environ.get(k,'').strip().strip('\"').strip(\"'\")]; print('env OK' if not miss else 'faltan env: '+', '.join(miss)); sys.exit(1 if miss else 0)"
             docker tag "$IMAGE:$DEPLOY_SHA" "$IMAGE:latest"
             docker compose up -d --no-build
-
-            docker compose exec -T dux-sync python -c "import os,sys; req=('DUX_TOKEN','SUPABASE_URL','SUPABASE_SERVICE_KEY','TIENDANUBE_STORE_ID','TIENDANUBE_ACCESS_TOKEN','OPENAI_API_KEY','META_AD_ACCOUNT_ID','META_ACCESS_TOKEN'); miss=[k for k in req if not os.environ.get(k)]; print('env OK' if not miss else 'faltan env: '+', '.join(miss)); sys.exit(1 if miss else 0)"
 
             # Healthcheck: esperar a que el servicio responda 200 en /health (hasta ~30s).
             ok=0
