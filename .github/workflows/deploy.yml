@@ -80,11 +80,18 @@ jobs:
             set -e
             cd /opt/apps/Facturas-Ferrepro
             IMAGE=ghcr.io/augustoterrera/facturas-ferrepro
+            DEPLOY_SHA=${{ github.sha }}
 
             PREV=$(git rev-parse HEAD)
             git pull --ff-only
-            docker compose pull
-            docker compose up -d
+
+            n=0
+            until docker pull "$IMAGE:$DEPLOY_SHA"; do
+              n=$((n+1)); [ "$n" -ge 3 ] && { echo "pull falló tras $n intentos"; exit 1; }
+              echo "GHCR no respondió; reintento $n en 15s..."; sleep 15
+            done
+            docker tag "$IMAGE:$DEPLOY_SHA" "$IMAGE:latest"
+            docker compose up -d --no-build
 
             docker compose exec -T dux-sync python -c "import os,sys; req=('DUX_TOKEN','SUPABASE_URL','SUPABASE_SERVICE_KEY','TIENDANUBE_STORE_ID','TIENDANUBE_ACCESS_TOKEN','OPENAI_API_KEY','META_AD_ACCOUNT_ID','META_ACCESS_TOKEN'); miss=[k for k in req if not os.environ.get(k)]; print('env OK' if not miss else 'faltan env: '+', '.join(miss)); sys.exit(1 if miss else 0)"
 
@@ -101,7 +108,7 @@ jobs:
               echo "HEALTHCHECK FALLÓ -> rollback al commit/imagen previos ($PREV)"
               git reset --hard "$PREV"
               docker pull "$IMAGE:$PREV" && docker tag "$IMAGE:$PREV" "$IMAGE:latest" || true
-              docker compose up -d
+              docker compose up -d --no-build
               exit 1
             fi
             echo "Deploy OK y healthy en $(git rev-parse --short HEAD)"
